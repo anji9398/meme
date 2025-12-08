@@ -21,7 +21,7 @@ public class AddressController {
     @PostMapping("/identify-village")
     public ResponseEntity<?> identifyVillage(@RequestBody AddressDetectionRequest request) {
 
-        String info = villageService.detectVillage(request);
+        VillageDetectionResult info = villageService.detectVillage(request);
 
         if (info == null) {
             return ResponseEntity.ok(
@@ -29,6 +29,12 @@ public class AddressController {
             );
         }
         return ResponseEntity.ok(info);
+    }
+
+    @PostMapping("/update-all")
+    public String updateAllUnits() {
+        int updated = villageService.updateAllUnitsVillage();
+        return "Village update completed. Records updated: " + updated;
     }
 
 //    @GetMapping("/download")

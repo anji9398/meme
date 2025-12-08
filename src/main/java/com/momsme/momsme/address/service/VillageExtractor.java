@@ -6,120 +6,58 @@ import java.util.*;
 
 public class VillageExtractor {
 
-    private final Set<String> villageSet = new HashSet<>();
-    private final Set<String> mandalSet = new HashSet<>();
-    private final Map<String, String> normalizedToOriginal = new HashMap<>();
-    private final Map<String, Set<String>> mandalToVillages = new HashMap<>();
-    private final String originalJson;
+    /* ---------------- STOP WORDS --------------- */
+    private static final Set<String> STOP_WORDS = Set.of(
+            "flat","floor","no","dno","door","house","building","bldg","apartment","apt",
+            "road","rd","street","st","lane","ln", "adilabad",
+            "near","beside","behind","opp","opposite","bus","stand",
+            "area","colony", "nagar",
+            "village","vill","v","town","city",
+            "block","blk","dist","district",
+            "mandal","mdl","m"
+    );
 
+    /* ---------------- Village Info --------------- */
+    static class VillageInfo {
+        Integer villageId;
+        String villageName;
+        Integer mandalId;
+        String mandalName;
+        String villageNorm;
+
+        VillageInfo(Integer vid, String vname, Integer mid, String mname) {
+            this.villageId = vid;
+            this.villageName = vname;
+            this.mandalId = mid;
+            this.mandalName = mname;
+            this.villageNorm = normalize(vname);
+        }
+    }
+
+    private final List<VillageInfo> allVillages = new ArrayList<>();
+
+    /* ---------------- Constructor --------------- */
     public VillageExtractor(String json) {
-        this.originalJson = json;
-
-        JSONObject root = new JSONObject(json);
+        JSONObject root = new JSONObject(json.trim());
         JSONArray mandalsArr = root.getJSONArray("mandals");
 
         for (int i = 0; i < mandalsArr.length(); i++) {
             JSONObject mandalObj = mandalsArr.getJSONObject(i);
+            Integer mandalId = mandalObj.getInt("mandalId");
             String mandalName = mandalObj.getString("mandalName");
-            String mandalNorm = normalize(mandalName);
-            mandalSet.add(mandalNorm);
 
             JSONArray villagesArr = mandalObj.getJSONArray("villages");
-            Set<String> vset = new LinkedHashSet<>();
             for (int j = 0; j < villagesArr.length(); j++) {
-                String vname = villagesArr.getJSONObject(j).getString("villageName");
-                String vnorm = normalize(vname);
-                vset.add(vnorm);
-                villageSet.add(vnorm);
-                normalizedToOriginal.putIfAbsent(vnorm, vname);
-            }
-            mandalToVillages.put(mandalNorm, vset);
-        }
-    }
-
-    private String formatConflict(Collection<String> normalizedVillages) {
-        List<String> originals = new ArrayList<>();
-        for (String n : normalizedVillages) {
-            String orig = normalizedToOriginal.getOrDefault(n, n);
-            originals.add(orig);
-        }
-        return "village_conflict:" + String.join(", ", originals);
-    }
-
-    /* ---------------------------------------------------------
-       🔥 Detect Mandal from Address (Primary method to call)
-       --------------------------------------------------------- */
-    public String detectMandal(String address) {
-        if (address == null) return null;
-        return extractMandalOpt1(address);
-    }
-
-    /* ----------------------------------------------------------
-       🔥 Detect Village inside detected Mandal (main method)
-       ---------------------------------------------------------- */
-    public String detectVillage(String address, String mandalName) {
-        if (address == null || mandalName == null) return null;
-        // convenience wrapper: use extractVillageWithinMandal
-        return extractVillageWithinMandal(address);
-    }
-
-    /* ------------------------------------------------
-       Mandal Extraction (unchanged logic)
-       ------------------------------------------------ */
-    public String extractMandalOpt1(String address) {
-        if (address == null || address.trim().isEmpty()) return null;
-
-        String cleaned = normalize(address);
-        String[] tokens = cleaned.split(" ");
-
-        String bestMatch = null;
-        double bestScore = 0.0;
-
-        for (String mandal : mandalSet) {
-
-            // direct substring match
-            if (cleaned.contains(mandal)) {
-                return mandal; // highest confidence
-            }
-
-            // token-based max similarity
-            for (int i = 0; i < tokens.length; i++) {
-
-                String w1 = tokens[i];
-                double score1 = similarity(w1, mandal);
-                if (score1 > bestScore) {
-                    bestScore = score1;
-                    bestMatch = mandal;
-                }
-
-                if (i + 1 < tokens.length) {
-                    String w2 = tokens[i] + " " + tokens[i + 1];
-                    double score2 = similarity(w2, mandal);
-                    if (score2 > bestScore) {
-                        bestScore = score2;
-                        bestMatch = mandal;
-                    }
-                }
-
-                if (i + 2 < tokens.length) {
-                    String w3 = tokens[i] + " " + tokens[i + 1] + " " + tokens[i + 2];
-                    double score3 = similarity(w3, mandal);
-                    if (score3 > bestScore) {
-                        bestScore = score3;
-                        bestMatch = mandal;
-                    }
-                }
+                JSONObject vObj = villagesArr.getJSONObject(j);
+                Integer villageId = vObj.getInt("villageId");
+                String villageName = vObj.getString("villageName");
+                allVillages.add(new VillageInfo(villageId, villageName, mandalId, mandalName));
             }
         }
-
-        // Final threshold check
-        return (bestMatch != null && bestScore >= 0.90) ? bestMatch : null;
     }
 
-    /* ------------------------------------------------
-       Utility Methods
-       ------------------------------------------------ */
-    private String normalize(String s) {
+    /* ---------------- NORMALIZE + STOP WORD CLEANER --------------- */
+    private static String normalize(String s) {
         if (s == null) return "";
         return s.toLowerCase()
                 .replaceAll("[^a-z]", " ")
@@ -127,167 +65,201 @@ public class VillageExtractor {
                 .trim();
     }
 
-    private double similarity(String s1, String s2) {
-        int dist = levenshtein(s1, s2);
-        int maxLen = Math.max(s1.length(), s2.length());
-        if (maxLen == 0) return 1.0;
-        return 1.0 - ((double) dist / maxLen);
+    private static String removeStopWords(String normalized) {
+        List<String> kept = new ArrayList<>();
+        for (String t : normalized.split(" ")) {
+            if (!STOP_WORDS.contains(t)) kept.add(t);
+        }
+        return String.join(" ", kept).trim();
     }
 
-    private int levenshtein(String s1, String s2) {
-        int[][] dp = new int[s1.length() + 1][s2.length() + 1];
-        for (int i = 0; i <= s1.length(); i++) dp[i][0] = i;
-        for (int j = 0; j <= s2.length(); j++) dp[0][j] = j;
+    /* ---------------- MASTER MATCH FUNCTION --------------- */
+    public VillageDetectionResult detect(String address) {
+        String normalized = normalize(address);
+        String cleaned = removeStopWords(normalized);
 
-        for (int i = 1; i <= s1.length(); i++)
-            for (int j = 1; j <= s2.length(); j++) {
-                int cost = (s1.charAt(i - 1) == s2.charAt(j - 1)) ? 0 : 1;
-                dp[i][j] = Math.min(
-                        Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1),
-                        dp[i - 1][j - 1] + cost
-                );
-            }
-        return dp[s1.length()][s2.length()];
+        System.out.println("\n====== INPUT DEBUG ======");
+        System.out.println("Raw: " + address);
+        System.out.println("Normalized: " + normalized);
+        System.out.println("Stop-word cleaned: " + cleaned);
+
+        if (cleaned.isEmpty())
+            return new VillageDetectionResult("INVALID", List.of());
+
+        VillageDetectionResult strict = strictMatch(cleaned);
+        if (!strict.status().equals("NOT_FOUND")) return strict;
+
+        VillageDetectionResult token = substringMatch(cleaned);
+        if (!token.status().equals("NOT_FOUND")) return token;
+
+        VillageDetectionResult fuzzy = fuzzyMatch(cleaned);
+        if (!fuzzy.status().equals("NOT_FOUND")) return fuzzy;
+
+        VillageDetectionResult phonetic = phoneticMatch(cleaned);
+        if (!phonetic.status().equals("NOT_FOUND")) return phonetic;
+
+        VillageDetectionResult recover = longNameRecovery(cleaned);
+        if (!recover.status().equals("NOT_FOUND")) return recover;
+
+        VillageDetectionResult syllable = syllableDetect(cleaned);
+        if (!syllable.status().equals("NOT_FOUND")) return syllable;
+
+        return new VillageDetectionResult("NOT_FOUND", List.of());
     }
 
-    /* ------------------------------------------------
-       Get villages by mandal (unchanged)
-       ------------------------------------------------ */
-    public Set<String> getVillagesByMandal(String mandalName) {
-        if (mandalName == null) return Set.of();
-        return mandalToVillages.getOrDefault(normalize(mandalName), Set.of());
+    /* ---------------- MATCHING LAYERS ---------------- */
+
+    private VillageDetectionResult strictMatch(String cleaned) {
+        System.out.println("[STRICT] tokens = " + cleaned);
+        Set<String> tokens = new HashSet<>(Arrays.asList(cleaned.split(" ")));
+
+        List<VillageInfo> matches = new ArrayList<>();
+        for (VillageInfo v : allVillages) if (tokens.contains(v.villageNorm)) matches.add(v);
+
+        return buildResponse(matches, "EXACT_MATCH");
     }
 
-    public String extractVillageWithinMandal(String address) {
+    private VillageDetectionResult substringMatch(String cleaned) {
+        System.out.println("[SUBSTRING]");
+        String[] rawTokens = cleaned.split(" ");
 
-        if (address == null || address.trim().isEmpty()) return "village_not_found";
+        Set<String> inputTokens = new HashSet<>();
+        for (String t : rawTokens) if (t.length() >= 3) inputTokens.add(t);
 
-        String mandal = extractMandalOpt1(address);
-        if (mandal == null) return "mandal_not_found";
-
-        Set<String> villagesInMandal = getVillagesByMandal(mandal);
-        if (villagesInMandal.isEmpty()) return "village_not_found";
-
-        String cleaned = normalize(address);
-        String[] tokens = cleaned.split(" ");
-
-        // build variants for each village (normalized)
-        Map<String, Set<String>> variants = new LinkedHashMap<>();
-        for (String v : villagesInMandal) {
-            Set<String> vs = new LinkedHashSet<>();
-            String base = v.replaceAll("\\s+", " ");
-            vs.add(base);
-            vs.add(base.replaceAll("\\([^)]*\\)", "").trim());
-            vs.add(base.replace("-", " ").trim());
-            vs.add(base.replace("_", " ").trim());
-            vs.add(base.replaceAll("\\s+", " ").trim());
-            variants.put(v, vs);
+        List<VillageInfo> matches = new ArrayList<>();
+        for (VillageInfo v : allVillages) {
+            Set<String> vTokens = new HashSet<>();
+            for (String t : v.villageNorm.split(" ")) if (t.length() >= 3) vTokens.add(t);
+            if (!Collections.disjoint(inputTokens, vTokens)) matches.add(v);
         }
-
-        // 1) exact substring match
-        Set<String> exactMatches = new LinkedHashSet<>();
-        for (Map.Entry<String, Set<String>> e : variants.entrySet()) {
-            String vnorm = e.getKey();
-            for (String var : e.getValue()) {
-                if (var.isEmpty()) continue;
-                if (cleaned.contains(var)) {
-                    exactMatches.add(vnorm);
-                    break;
-                }
-            }
-        }
-
-        if (exactMatches.size() == 1) return normalizedToOriginal.getOrDefault(exactMatches.iterator().next(), exactMatches.iterator().next());
-        if (exactMatches.size() > 1) return formatConflict(exactMatches);
-
-        // QUICK STEM check (leading token)
-        Map<String, Set<String>> leadingMap = new LinkedHashMap<>();
-        for (Map.Entry<String, Set<String>> e : variants.entrySet()) {
-            String vnorm = e.getKey();
-            for (String var : e.getValue()) {
-                if (var == null || var.isEmpty()) continue;
-                String[] vtoks = var.split(" ");
-                if (vtoks.length == 0) continue;
-                String lead = vtoks[0];
-                leadingMap.computeIfAbsent(lead, k -> new LinkedHashSet<>()).add(vnorm);
-            }
-        }
-
-        for (Map.Entry<String, Set<String>> e : leadingMap.entrySet()) {
-            String lead = e.getKey();
-            Set<String> group = e.getValue();
-            boolean matched = false;
-            for (String t : tokens) {
-                if (t == null || t.isEmpty()) continue;
-                double sim = similarity(t, lead);
-                if (t.contains(lead) || lead.contains(t) || t.startsWith(lead) || lead.startsWith(t) || sim >= 0.78) {
-                    matched = true;
-                    break;
-                }
-            }
-            if (matched) {
-                if (group.size() > 1) return formatConflict(group);
-                if (group.size() == 1) return normalizedToOriginal.getOrDefault(group.iterator().next(), group.iterator().next());
-            }
-        }
-
-        // 2) context window around mandal
-        String nm = normalize(mandal);
-        int mandalIndex = -1;
-        for (int i = 0; i < tokens.length; i++) if (tokens[i].contains(nm)) { mandalIndex = i; break; }
-
-        int start = 0, end = tokens.length;
-        if (mandalIndex != -1) { start = Math.max(0, mandalIndex - 3); end = Math.min(tokens.length, mandalIndex + 6); }
-        else { start = 0; end = Math.min(tokens.length, 8); }
-
-        List<String> candidateWords = new ArrayList<>();
-        for (int i = start; i < end; i++) candidateWords.add(tokens[i]);
-        String context = String.join(" ", candidateWords);
-
-        // n-grams
-        List<String> ngrams = new ArrayList<>();
-        String[] ctxTokens = context.split(" ");
-        for (int i = 0; i < ctxTokens.length; i++) {
-            StringBuilder sb = new StringBuilder();
-            for (int l = 1; l <= 4 && i + l <= ctxTokens.length; l++) {
-                if (l > 1) sb.append(" ");
-                sb.append(ctxTokens[i + l - 1]);
-                ngrams.add(sb.toString());
-            }
-        }
-        if (ngrams.isEmpty()) ngrams.add(context);
-
-        double bestScore = 0.0;
-        String bestVillage = null;
-        Map<String, Double> topScores = new LinkedHashMap<>();
-
-        for (String v : variants.keySet()) {
-            double localBest = 0.0;
-            for (String var : variants.get(v)) {
-                if (var == null || var.isEmpty()) continue;
-                localBest = Math.max(localBest, similarity(context, var));
-                for (String ng : ngrams) localBest = Math.max(localBest, similarity(ng, var));
-            }
-            topScores.put(v, localBest);
-            if (localBest > bestScore) { bestScore = localBest; bestVillage = v; }
-        }
-
-        double threshold = 0.90;
-        if (bestVillage != null && bestVillage.length() <= 3 && bestScore < 0.99) return "village_not_found";
-        if (bestScore < threshold) return "village_not_found";
-
-        Set<String> tied = new LinkedHashSet<>();
-        for (Map.Entry<String, Double> en : topScores.entrySet()) {
-            String v = en.getKey();
-            Double sc = en.getValue();
-            if (sc >= threshold) tied.add(v);
-            else if (sc + 0.02 >= bestScore && sc >= (threshold - 0.02)) tied.add(v);
-        }
-
-        if (tied.size() > 1) return formatConflict(tied);
-        if (tied.size() == 1) return normalizedToOriginal.getOrDefault(tied.iterator().next(), tied.iterator().next());
-
-        return normalizedToOriginal.getOrDefault(bestVillage, bestVillage);
+        return buildResponse(matches, "TOKEN_SUBSTRING_FUZZY");
     }
 
+    private VillageDetectionResult syllableDetect(String cleaned) {
+        System.out.println("[SYLLABLE]");
+        String c = cleaned.replace(" ", "");
+        List<VillageInfo> matches = new ArrayList<>();
+        for (VillageInfo v : allVillages) {
+            String vn = v.villageNorm.replace(" ", "");
+            if (c.length() >= 6 && vn.length() >= 6) {
+                String startC = c.substring(0, Math.min(5, c.length()));
+                String startV = vn.substring(0, Math.min(5, vn.length()));
+                String endC = c.substring(c.length() - 3);
+                String endV = vn.substring(vn.length() - 3);
+                if (startC.equals(startV) || endC.equals(endV)) matches.add(v);
+            }
+        }
+        return buildResponse(matches, "SYLLABLE_FUZZY");
+    }
+
+    private VillageDetectionResult fuzzyMatch(String cleaned) {
+        System.out.println("[FUZZY]");
+        List<ScoredVillage> candidates = new ArrayList<>();
+
+        for (VillageInfo v : allVillages) {
+            double score = similarity(cleaned, v.villageNorm);
+            if (score >= 0.90) candidates.add(new ScoredVillage(v, score));
+        }
+
+        if (candidates.isEmpty()) return new VillageDetectionResult("NOT_FOUND", List.of());
+        candidates.sort((a, b) -> Double.compare(b.score, a.score));
+        return success(candidates.get(0).village, "FUZZY_MATCH score=" + candidates.get(0).score);
+    }
+
+    private VillageDetectionResult phoneticMatch(String cleaned) {
+        System.out.println("[PHONETIC]");
+        String c = cleaned.replace(" ", "");
+        List<ScoredVillage> candidates = new ArrayList<>();
+
+        for (VillageInfo v : allVillages) {
+            String vn = v.villageNorm.replace(" ", "");
+            double lev = levenshteinRatio(c, vn);
+            double soft = softPhonetic(c, vn);
+            if (lev >= 0.85) candidates.add(new ScoredVillage(v, Math.max(lev, soft)));
+        }
+
+        if (candidates.isEmpty()) return new VillageDetectionResult("NOT_FOUND", List.of());
+        candidates.sort((a, b) -> Double.compare(b.score, a.score));
+        return success(candidates.get(0).village, "PHONETIC_FUZZY score=" + candidates.get(0).score);
+    }
+
+    private VillageDetectionResult longNameRecovery(String cleaned) {
+        System.out.println("[LONG_NAME_RECOVERY]");
+        String c = cleaned.replace(" ", "");
+        List<ScoredVillage> candidates = new ArrayList<>();
+
+        for (VillageInfo v : allVillages) {
+            String vn = v.villageNorm.replace(" ", "");
+            if (vn.length() >= 10 && c.length() >= 6) {
+                double score = levenshteinRatio(c, vn);
+                if (score >= 0.78) candidates.add(new ScoredVillage(v, score));
+            }
+        }
+
+        if (candidates.isEmpty()) return new VillageDetectionResult("NOT_FOUND", List.of());
+        candidates.sort((a, b) -> Double.compare(b.score, a.score));
+        return success(candidates.get(0).village, "LONG_NAME_RECOVERY score=" + candidates.get(0).score);
+    }
+
+    /* ---------------- Response Helpers ---------------- */
+
+    private VillageDetectionResult buildResponse(List<VillageInfo> list, String label) {
+        if (list.isEmpty()) return new VillageDetectionResult("NOT_FOUND", List.of());
+        List<VillageDetectionResult.Match> out = new ArrayList<>();
+        for (VillageInfo v : list) out.add(match(v, label));
+        if (out.size() > 1) return new VillageDetectionResult("CONFLICT", out);
+        return new VillageDetectionResult("SUCCESS", out);
+    }
+
+    private VillageDetectionResult success(VillageInfo v, String label) {
+        return new VillageDetectionResult("SUCCESS", List.of(match(v, label)));
+    }
+
+    private VillageDetectionResult.Match match(VillageInfo v, String label) {
+        return new VillageDetectionResult.Match(
+                v.mandalId,
+                v.villageId,
+                v.mandalName,
+                v.villageName,
+                label
+        );
+    }
+
+    /* ---------------- Similarity Utils ---------------- */
+
+    private static double similarity(String a, String b) {
+        Set<String> A = new HashSet<>(Arrays.asList(a.split(" ")));
+        Set<String> B = new HashSet<>(Arrays.asList(b.split(" ")));
+        int common = 0;
+        for (String s : A) if (B.contains(s)) common++;
+        return (2.0 * common) / (A.size() + B.size());
+    }
+
+    private static double levenshteinRatio(String a, String b) {
+        int[][] dp = new int[a.length() + 1][b.length() + 1];
+        for (int i = 0; i <= a.length(); i++) dp[i][0] = i;
+        for (int j = 0; j <= b.length(); j++) dp[0][j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = (a.charAt(i - 1) == b.charAt(j - 1)) ? 0 : 1;
+                dp[i][j] = Math.min(Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1),
+                        dp[i - 1][j - 1] + cost);
+            }
+        }
+        int dist = dp[a.length()][b.length()];
+        return 1.0 - ((double) dist / Math.max(a.length(), b.length()));
+    }
+
+    private static double softPhonetic(String a, String b) {
+        int matches = 0;
+        int len = Math.min(a.length(), b.length());
+        for (int i = 0; i < len; i++) if (a.charAt(i) == b.charAt(i)) matches++;
+        return (double) matches / Math.max(a.length(), b.length());
+    }
+
+    private static class ScoredVillage {
+        VillageInfo village;
+        double score;
+        ScoredVillage(VillageInfo v, double s) { village = v; score = s; }
+    }
 }

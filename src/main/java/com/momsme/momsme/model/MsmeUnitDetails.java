@@ -1,9 +1,12 @@
 package com.momsme.momsme.model;
 
+import com.momsme.momsme.address.service.VillageDetectionResult;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.util.List;
 
 @Data
 @Entity
@@ -48,13 +51,16 @@ public class MsmeUnitDetails {
     private String street;
 
     @Column(name = "villageId")
-    private String villageId;
+    private Integer villageId;
 
     @Column(name = "village")
     private String village;
 
     @Column(name = "ward")
     private String ward;
+
+    @Column(name = "mandalId")
+    private Integer mandalId;
 
     @Column(name = "mandal")
     private String mandal;
@@ -268,5 +274,11 @@ public class MsmeUnitDetails {
 
     @Column(name = "firmregyear")
     private String firmRegYear;
+
+    @Column(name = "iteration")
+    private String iteration;
+
+    @Column(columnDefinition = "TEXT")
+    private String matchedDetails;
 }
 
