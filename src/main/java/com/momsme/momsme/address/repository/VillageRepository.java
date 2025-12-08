@@ -37,4 +37,5 @@ public interface VillageRepository extends JpaRepository<Village, Long> {
     List<VillageInfo> findByVillageAndMandal(String village, String mandal);
 
     Village findByNameIgnoreCase(String word);
+    List<Village> findByMandal_Id(Long mandalId);
 }

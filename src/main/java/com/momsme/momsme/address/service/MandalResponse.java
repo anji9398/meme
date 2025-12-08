@@ -1,3 +1,3 @@
 package com.momsme.momsme.address.service;
 
-public record MandalResponse(Integer mandalId, String mandalName) {}
+public record MandalResponse(Long mandalId, String mandalName) {}
